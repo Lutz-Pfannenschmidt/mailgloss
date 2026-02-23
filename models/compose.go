@@ -5,6 +5,7 @@ import (
 	"net/mail"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -27,6 +28,8 @@ type ComposeModel struct {
 	config           *config.Config
 	fileSelector     *FileSelectModel // File selector for attachments
 	showFileSelector bool             // Whether to show file selector
+	spinner          spinner.Model    // Loading spinner
+	isSending        bool             // Whether email is being sent
 }
 
 const (
@@ -104,6 +107,11 @@ func NewComposeModel(cfg *config.Config) ComposeModel {
 	ta.SetHeight(8)
 	ta.CharLimit = limits.MaxBodyLength
 
+	// Create spinner
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = ui.SpinnerStyle
+
 	return ComposeModel{
 		inputs:           inputs,
 		textarea:         ta,
@@ -115,17 +123,24 @@ func NewComposeModel(cfg *config.Config) ComposeModel {
 		config:           cfg,
 		fileSelector:     nil,
 		showFileSelector: false,
+		spinner:          s,
+		isSending:        false,
 	}
 }
 
 // Init initializes the compose model
 func (m ComposeModel) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, m.spinner.Tick)
 }
 
 // Update handles messages for the compose model
 func (m ComposeModel) Update(msg tea.Msg) (ComposeModel, tea.Cmd) {
 	var cmds []tea.Cmd
+
+	// Update spinner
+	var spinnerCmd tea.Cmd
+	m.spinner, spinnerCmd = m.spinner.Update(msg)
+	cmds = append(cmds, spinnerCmd)
 
 	// If file selector is open, route messages to it
 	if m.showFileSelector && m.fileSelector != nil {
@@ -228,6 +243,7 @@ func (m ComposeModel) Update(msg tea.Msg) (ComposeModel, tea.Cmd) {
 
 			// Send email if on send button
 			if m.FocusIndex == sendButton {
+				m.isSending = true
 				return m, m.sendEmail()
 			}
 
@@ -280,7 +296,20 @@ func (m ComposeModel) View() string {
 	b.WriteString("\n")
 
 	if len(m.providers) == 0 {
-		b.WriteString(ui.ErrorStyle.Render("No providers configured. Go to Settings (Tab 3) to add a provider."))
+		emptyState := ui.ErrorStyle.Render("⚠ No providers configured")
+		b.WriteString(emptyState)
+		b.WriteString("\n\n")
+
+		helpText := ui.InfoStyle.Render(
+			"To send emails, you need to configure at least one email provider.\n\n" +
+				"Steps to get started:\n" +
+				"  1. Press '3' or Tab to go to Settings\n" +
+				"  2. Add a new email provider (Mailgun, SMTP, SendGrid, etc.)\n" +
+				"  3. Configure your provider credentials\n" +
+				"  4. Return to Compose tab to send emails",
+		)
+		b.WriteString(helpText)
+		return b.String()
 	} else {
 		providerDisplay := m.selectedProvider
 		if focused {
@@ -350,6 +379,13 @@ func (m ComposeModel) View() string {
 		b.WriteString(ui.ButtonFocusedStyle.Render(buttonText))
 	} else {
 		b.WriteString(ui.ButtonStyle.Render(buttonText))
+	}
+
+	// Show spinner if sending
+	if m.isSending {
+		b.WriteString("  ")
+		b.WriteString(m.spinner.View())
+		b.WriteString(" Sending email...")
 	}
 
 	b.WriteString("\n\n")

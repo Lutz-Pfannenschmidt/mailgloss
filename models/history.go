@@ -111,9 +111,22 @@ func (m HistoryModel) viewList(emails []storage.SentEmail) string {
 	b.WriteString("\n\n")
 
 	if len(emails) == 0 {
-		b.WriteString(ui.InfoStyle.Render("No emails sent yet."))
+		emptyState := ui.InfoStyle.Render("📭 No emails sent yet")
+		b.WriteString(emptyState)
 		b.WriteString("\n\n")
-		b.WriteString(ui.RenderHelp("Tab", "switch tabs"))
+
+		helpText := ui.SubtitleStyle.Render(
+			"Your email history will appear here once you send emails.\n\n" +
+				"Quick tips:\n" +
+				"  • All sent emails are saved with their status (success/failed)\n" +
+				"  • Press Enter on any email to view full details\n" +
+				"  • Use ↑/↓ or j/k to navigate the list\n" +
+				"  • Press g/G to jump to top/bottom\n\n" +
+				"Ready to send your first email? Press '1' to go to Compose!",
+		)
+		b.WriteString(helpText)
+		b.WriteString("\n\n")
+		b.WriteString(ui.RenderHelp("1", "compose", "Tab", "switch tabs"))
 		return b.String()
 	}
 
@@ -194,41 +207,41 @@ func (m HistoryModel) viewEmail(email storage.SentEmail) string {
 	b.WriteString("\n\n")
 
 	// Metadata
-	b.WriteString(ui.LabelStyle.Render("Sent At:"))
+	b.WriteString(ui.DisplayLabelStyle.Render("Sent At:"))
 	b.WriteString(" " + email.SentAt.Format("2006-01-02 15:04:05") + "\n")
 
-	b.WriteString(ui.LabelStyle.Render("From:"))
+	b.WriteString(ui.DisplayLabelStyle.Render("From:"))
 	b.WriteString(" " + email.From + "\n")
 
-	b.WriteString(ui.LabelStyle.Render("Provider:"))
+	b.WriteString(ui.DisplayLabelStyle.Render("Provider:"))
 	b.WriteString(" " + email.Provider + "\n")
 
-	b.WriteString(ui.LabelStyle.Render("Provider Config:"))
+	b.WriteString(ui.DisplayLabelStyle.Render("Provider Config:"))
 	b.WriteString(" " + email.ProviderName + "\n\n")
 
 	// Recipients
-	b.WriteString(ui.LabelStyle.Render("To:"))
+	b.WriteString(ui.DisplayLabelStyle.Render("To:"))
 	b.WriteString(" " + strings.Join(email.To, ", ") + "\n")
 
 	if len(email.CC) > 0 {
-		b.WriteString(ui.LabelStyle.Render("CC:"))
+		b.WriteString(ui.DisplayLabelStyle.Render("CC:"))
 		b.WriteString(" " + strings.Join(email.CC, ", ") + "\n")
 	}
 
 	if len(email.BCC) > 0 {
-		b.WriteString(ui.LabelStyle.Render("BCC:"))
+		b.WriteString(ui.DisplayLabelStyle.Render("BCC:"))
 		b.WriteString(" " + strings.Join(email.BCC, ", ") + "\n")
 	}
 
 	b.WriteString("\n")
 
 	// Subject
-	b.WriteString(ui.LabelStyle.Render("Subject:"))
+	b.WriteString(ui.DisplayLabelStyle.Render("Subject:"))
 	b.WriteString("\n" + email.Subject + "\n\n")
 
 	// Attachments
 	if len(email.Attachments) > 0 {
-		b.WriteString(ui.LabelStyle.Render("Attachments:"))
+		b.WriteString(ui.DisplayLabelStyle.Render("Attachments:"))
 		b.WriteString("\n")
 		for _, att := range email.Attachments {
 			b.WriteString("  • " + att + "\n")
@@ -237,7 +250,7 @@ func (m HistoryModel) viewEmail(email storage.SentEmail) string {
 	}
 
 	// Body
-	b.WriteString(ui.LabelStyle.Render("Body:"))
+	b.WriteString(ui.DisplayLabelStyle.Render("Body:"))
 	b.WriteString("\n")
 	b.WriteString(ui.DividerStyle.Render(strings.Repeat("─", 60)))
 	b.WriteString("\n")

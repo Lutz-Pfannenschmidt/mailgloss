@@ -144,12 +144,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Get provider config
 		if msg.ProviderName == "" {
 			m.errorMsg = "Please select a provider"
+			m.composeModel.isSending = false
 			return m, nil
 		}
 
 		providerConfig, err := m.config.GetProvider(msg.ProviderName)
 		if err != nil {
 			m.errorMsg = fmt.Sprintf("Provider error: %v", err)
+			m.composeModel.isSending = false
 			return m, nil
 		}
 
@@ -170,6 +172,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		ml, err := mailer.NewWithLimits(providerConfig, limits.MaxAttachmentSizeMB)
 		if err != nil {
 			m.errorMsg = fmt.Sprintf("Failed to initialize mailer: %v", err)
+			m.composeModel.isSending = false
 			return m, nil
 		}
 
@@ -204,10 +207,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errorMsg = fmt.Sprintf("Failed to send email: %v", err)
 			historyEntry.Status = "failed"
 			historyEntry.Error = err.Error()
+			m.composeModel.isSending = false
 		} else {
 			m.statusMsg = "Email sent successfully!"
 			historyEntry.Status = "success"
 			m.composeModel.Clear()
+			m.composeModel.isSending = false
 		}
 
 		// Save to history regardless of success/failure
@@ -222,6 +227,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle email validation errors
 		m.statusMsg = ""
 		m.errorMsg = fmt.Sprintf("Validation error: %s", msg.Error)
+		m.composeModel.isSending = false
 		return m, nil
 
 	case ConfigSavedMsg:
@@ -261,8 +267,8 @@ func (m AppModel) View() string {
 		return ""
 	}
 
-	// Render tabs
-	tabs := []string{"1. Compose", "2. History", "3. Settings"}
+	// Render tabs with icons
+	tabs := []string{"✉ Compose", "📜 History", "⚙ Settings"}
 	tabBar := ui.RenderTabs(tabs, int(m.activeTab))
 
 	// Render active tab content

@@ -79,6 +79,11 @@ var (
 			Bold(true).
 			Width(15)
 
+	// Display label (no fixed width, prevents wrapping)
+	DisplayLabelStyle = lipgloss.NewStyle().
+				Foreground(Info).
+				Bold(true)
+
 	InputStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252"))
 
@@ -220,3 +225,20 @@ func Divider(width int) string {
 	}
 	return DividerStyle.Render(divider)
 }
+
+// CalculateInputWidth calculates responsive input width based on terminal width
+func CalculateInputWidth(termWidth int) int {
+	// Default width
+	return 60
+}
+
+// CalculateTextAreaWidth calculates responsive textarea width
+func CalculateTextAreaWidth(termWidth int) int {
+	// Default width
+	return 64
+}
+
+// LoadingSpinner returns a spinner style
+var SpinnerStyle = lipgloss.NewStyle().
+	Foreground(Primary).
+	Bold(true)

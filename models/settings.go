@@ -464,7 +464,7 @@ func (m SettingsModel) renderListView() string {
 
 		for i, name := range m.providerList {
 			prefix := "  "
-			style := ui.LabelStyle
+			style := ui.DisplayLabelStyle
 			if i == m.selectedIdx {
 				prefix = "▸ "
 				style = style.Foreground(ui.Primary)
