@@ -17,6 +17,7 @@ type SettingsView int
 
 const (
 	SettingsViewList SettingsView = iota
+	SettingsViewApp
 	SettingsViewAdd
 	SettingsViewEdit
 )
@@ -38,6 +39,10 @@ type SettingsModel struct {
 	providerTypes   []config.Provider
 	providerTypeIdx int
 
+	// App-level settings form (separate from provider inputs)
+	appInputs     []textinput.Model
+	appFocusIndex int
+
 	// Status
 	saved     bool
 	saveError string
@@ -50,6 +55,7 @@ const (
 	settingsName
 	settingsFromAddress
 	settingsFromName
+	settingsDateFormat
 	// Mailgun fields
 	settingsMailgunAPIKey
 	settingsMailgunDomain
@@ -76,10 +82,10 @@ const (
 
 // NewSettingsModel creates a new settings model
 func NewSettingsModel(cfg *config.Config) SettingsModel {
-	return SettingsModel{
+	m := SettingsModel{
 		config:       cfg,
 		currentView:  SettingsViewList,
-		providerList: cfg.ListProviders(),
+		providerList: nil,
 		selectedIdx:  0,
 		providerTypes: []config.Provider{
 			config.ProviderMailgun,
@@ -90,6 +96,16 @@ func NewSettingsModel(cfg *config.Config) SettingsModel {
 			config.ProviderPostal,
 		},
 	}
+	m.refreshProviderList()
+	return m
+}
+
+// refreshProviderList reloads providerList and ensures "App Settings" is the first item
+func (m *SettingsModel) refreshProviderList() {
+	providers := m.config.ListProviders()
+	m.providerList = make([]string, 0, len(providers)+1)
+	m.providerList = append(m.providerList, "App Settings")
+	m.providerList = append(m.providerList, providers...)
 }
 
 // Init initializes the settings model
@@ -109,6 +125,11 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 		case SettingsViewAdd, SettingsViewEdit:
 			var cmd tea.Cmd
 			m, cmd = m.updateFormView(msg)
+			cmds = append(cmds, cmd)
+			// Don't return here - let input update below happen
+		case SettingsViewApp:
+			var cmd tea.Cmd
+			m, cmd = m.updateAppView(msg)
 			cmds = append(cmds, cmd)
 			// Don't return here - let input update below happen
 		}
@@ -136,6 +157,12 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 			m.inputs[m.FocusIndex-1], cmd = m.inputs[m.FocusIndex-1].Update(msg)
 			cmds = append(cmds, cmd)
 		}
+	} else if m.currentView == SettingsViewApp {
+		if m.appFocusIndex >= 0 && m.appFocusIndex < len(m.appInputs) {
+			var cmd tea.Cmd
+			m.appInputs[m.appFocusIndex], cmd = m.appInputs[m.appFocusIndex].Update(msg)
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -161,6 +188,19 @@ func (m SettingsModel) updateListView(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 	case "e", "enter":
 		// Edit selected provider
 		if len(m.providerList) > 0 {
+			// If App Settings (first item) selected
+			if m.selectedIdx == 0 {
+				m.currentView = SettingsViewApp
+				// initialize app inputs
+				m.appInputs = make([]textinput.Model, 1)
+				m.appInputs[0] = createInput("02.01.2006", 50, 60)
+				if m.config != nil && m.config.DateFormat != "" {
+					m.appInputs[0].SetValue(m.config.DateFormat)
+				}
+				m.appFocusIndex = 0
+				m.appInputs[0].Focus()
+				return m, nil
+			}
 			providerName := m.providerList[m.selectedIdx]
 			if pc, err := m.config.GetProvider(providerName); err == nil {
 				m.currentView = SettingsViewEdit
@@ -286,6 +326,50 @@ func (m SettingsModel) updateFormView(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// updateAppView handles the app-level settings form input/navigation
+func (m SettingsModel) updateAppView(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	switch msg.String() {
+	case "esc":
+		m.currentView = SettingsViewList
+		return m, nil
+
+	case "tab", "shift+tab", "up", "down":
+		s := msg.String()
+		if s == "up" || s == "shift+tab" {
+			m.appFocusIndex--
+		} else {
+			m.appFocusIndex++
+		}
+
+		if m.appFocusIndex >= len(m.appInputs) {
+			m.appFocusIndex = 0
+		} else if m.appFocusIndex < 0 {
+			m.appFocusIndex = len(m.appInputs) - 1
+		}
+
+		for i := range m.appInputs {
+			m.appInputs[i].Blur()
+		}
+		cmds = append(cmds, m.appInputs[m.appFocusIndex].Focus())
+		return m, tea.Batch(cmds...)
+
+	case "enter":
+		// Save app settings
+		dateFmt := m.appInputs[0].Value()
+		if dateFmt != "" {
+			m.config.DateFormat = dateFmt
+			if err := m.config.Save(); err != nil {
+				return m, func() tea.Msg { return ConfigErrorMsg{Error: err.Error()} }
+			}
+		}
+		return m, func() tea.Msg { return ConfigSavedMsg{} }
+	}
+
+	return m, nil
+}
+
 // initializeForm sets up the form inputs for add/edit
 func (m *SettingsModel) initializeForm(pc *config.ProviderConfig) {
 	// Create all possible inputs (excluding settingsProviderType which is not an input)
@@ -301,10 +385,15 @@ func (m *SettingsModel) initializeForm(pc *config.ProviderConfig) {
 	// Common fields
 	m.inputs[settingsFromAddress-1] = createInput("email@example.com", 200, 60)
 	m.inputs[settingsFromName-1] = createInput("Your Name", 200, 60)
+	m.inputs[settingsDateFormat-1] = createInput("02.01.2006", 50, 60)
 
 	if pc != nil {
 		m.inputs[settingsFromAddress-1].SetValue(pc.FromAddress)
 		m.inputs[settingsFromName-1].SetValue(pc.FromName)
+		// if config has date format set globally, use that for provider edit mode
+		if m.config != nil && m.config.DateFormat != "" {
+			m.inputs[settingsDateFormat-1].SetValue(m.config.DateFormat)
+		}
 	}
 
 	// Mailgun fields
@@ -439,12 +528,61 @@ func (m SettingsModel) View() string {
 	switch m.currentView {
 	case SettingsViewList:
 		return m.renderListView()
+	case SettingsViewApp:
+		return m.renderAppView()
 	case SettingsViewAdd:
 		return m.renderFormView("Add Provider")
 	case SettingsViewEdit:
 		return m.renderFormView("Edit Provider: " + m.editingName)
 	}
 	return ""
+}
+
+// renderAppView renders the app-level settings form
+func (m SettingsModel) renderAppView() string {
+	var b strings.Builder
+
+	b.WriteString(ui.TitleStyle.Render("Settings - App Settings"))
+	b.WriteString("\n\n")
+
+	labelStyle := ui.LabelStyle
+	if m.appFocusIndex == 0 {
+		labelStyle = labelStyle.Foreground(ui.Primary)
+	}
+	b.WriteString(labelStyle.Render("Date Format (Go layout, e.g. 02.01.2006):"))
+	b.WriteString("\n")
+
+	if len(m.appInputs) > 0 {
+		if m.appFocusIndex == 0 {
+			b.WriteString(ui.FocusedInputStyle.Render(m.appInputs[0].View()))
+		} else {
+			b.WriteString(m.appInputs[0].View())
+		}
+	}
+	b.WriteString("\n\n")
+
+	saveText := "[ Save ]"
+	if m.appFocusIndex == 1 {
+		b.WriteString(ui.ButtonFocusedStyle.Render(saveText))
+	} else {
+		b.WriteString(ui.ButtonStyle.Render(saveText))
+	}
+	b.WriteString("  ")
+	cancelText := "[ Cancel ]"
+	if m.appFocusIndex == 2 {
+		b.WriteString(ui.ButtonFocusedStyle.Render(cancelText))
+	} else {
+		b.WriteString(ui.ButtonStyle.Render(cancelText))
+	}
+
+	b.WriteString("\n\n")
+	b.WriteString(ui.RenderHelp(
+		"Tab", "next field",
+		"Enter", "save",
+		"Esc", "cancel",
+	))
+
+	return b.String()
 }
 
 // renderListView renders the provider list
@@ -525,6 +663,7 @@ func (m SettingsModel) renderFormView(title string) string {
 	// Common fields
 	m.renderField(&b, "From Address", settingsFromAddress, true)
 	m.renderField(&b, "From Name", settingsFromName, true)
+	m.renderField(&b, "Date Format", settingsDateFormat, true)
 	b.WriteString("\n")
 
 	// Provider-specific fields
@@ -709,6 +848,12 @@ func (m *SettingsModel) saveProviderConfig() tea.Cmd {
 		}
 
 		// Save config
+		// Save any app-level settings: date format
+		dateFmt := m.inputs[settingsDateFormat-1].Value()
+		if dateFmt != "" {
+			m.config.DateFormat = dateFmt
+		}
+
 		if err := m.config.Save(); err != nil {
 			return ConfigErrorMsg{Error: err.Error()}
 		}

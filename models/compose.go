@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/mail"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -11,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"mailgloss/config"
+	"mailgloss/storage"
 	"mailgloss/ui"
 )
 
@@ -26,10 +28,16 @@ type ComposeModel struct {
 	selectedProvider string   // Currently selected provider
 	providerIdx      int      // Index in providers list
 	config           *config.Config
-	fileSelector     *FileSelectModel // File selector for attachments
-	showFileSelector bool             // Whether to show file selector
-	spinner          spinner.Model    // Loading spinner
-	isSending        bool             // Whether email is being sent
+	fileSelector     *FileSelectModel     // File selector for attachments
+	showFileSelector bool                 // Whether to show file selector
+	picker           *PickerModel         // Contact/template picker
+	showPicker       bool                 // Whether to show picker
+	variablePrompt   *VariablePromptModel // Variable prompt for templates
+	showVarPrompt    bool                 // Whether to show variable prompt
+	contacts         *storage.Contacts
+	templates        *storage.Templates
+	spinner          spinner.Model // Loading spinner
+	isSending        bool          // Whether email is being sent
 }
 
 const (
@@ -45,7 +53,7 @@ const (
 )
 
 // NewComposeModel creates a new compose model
-func NewComposeModel(cfg *config.Config) ComposeModel {
+func NewComposeModel(cfg *config.Config, contacts *storage.Contacts, templates *storage.Templates) ComposeModel {
 	providers := cfg.ListProviders()
 	selectedProvider := cfg.DefaultProvider
 	providerIdx := 0
@@ -72,25 +80,25 @@ func NewComposeModel(cfg *config.Config) ComposeModel {
 
 	// To field
 	inputs[toInput-1] = textinput.New()
-	inputs[toInput-1].Placeholder = "recipient@example.com"
+	inputs[toInput-1].Placeholder = "recipient@example.com (Ctrl+P for contacts)"
 	inputs[toInput-1].CharLimit = limits.MaxEmailsPerField
 	inputs[toInput-1].Width = 60
 
 	// CC field
 	inputs[ccInput-1] = textinput.New()
-	inputs[ccInput-1].Placeholder = "cc@example.com (optional)"
+	inputs[ccInput-1].Placeholder = "cc@example.com (optional, Ctrl+P for contacts)"
 	inputs[ccInput-1].CharLimit = limits.MaxEmailsPerField
 	inputs[ccInput-1].Width = 60
 
 	// BCC field
 	inputs[bccInput-1] = textinput.New()
-	inputs[bccInput-1].Placeholder = "bcc@example.com (optional)"
+	inputs[bccInput-1].Placeholder = "bcc@example.com (optional, Ctrl+P for contacts)"
 	inputs[bccInput-1].CharLimit = limits.MaxEmailsPerField
 	inputs[bccInput-1].Width = 60
 
 	// Subject field
 	inputs[subjectInput-1] = textinput.New()
-	inputs[subjectInput-1].Placeholder = "Email subject"
+	inputs[subjectInput-1].Placeholder = "Email subject (Ctrl+T for templates)"
 	inputs[subjectInput-1].CharLimit = 200
 	inputs[subjectInput-1].Width = 60
 
@@ -102,7 +110,7 @@ func NewComposeModel(cfg *config.Config) ComposeModel {
 
 	// Create textarea for body
 	ta := textarea.New()
-	ta.Placeholder = "Email body..."
+	ta.Placeholder = "Email body... (Ctrl+T for templates)"
 	ta.SetWidth(64)
 	ta.SetHeight(8)
 	ta.CharLimit = limits.MaxBodyLength
@@ -123,6 +131,12 @@ func NewComposeModel(cfg *config.Config) ComposeModel {
 		config:           cfg,
 		fileSelector:     nil,
 		showFileSelector: false,
+		picker:           nil,
+		showPicker:       false,
+		variablePrompt:   nil,
+		showVarPrompt:    false,
+		contacts:         contacts,
+		templates:        templates,
 		spinner:          s,
 		isSending:        false,
 	}
@@ -141,6 +155,134 @@ func (m ComposeModel) Update(msg tea.Msg) (ComposeModel, tea.Cmd) {
 	var spinnerCmd tea.Cmd
 	m.spinner, spinnerCmd = m.spinner.Update(msg)
 	cmds = append(cmds, spinnerCmd)
+
+	// If variable prompt is open, route messages to it
+	if m.showVarPrompt && m.variablePrompt != nil {
+		switch msg := msg.(type) {
+		case VariablePromptSubmittedMsg:
+			// Variables submitted, render template with values
+			// Merge defaults (if any) with submitted values so submitted values override defaults
+			finalVars := make(map[string]string)
+			// If prompt existed, use its defaults
+			if m.variablePrompt != nil && m.variablePrompt.defaults != nil {
+				for k, v := range m.variablePrompt.defaults {
+					finalVars[k] = v
+				}
+			}
+			for k, v := range msg.Values {
+				finalVars[k] = v
+			}
+
+			subject, body := storage.RenderTemplate(msg.Template, finalVars)
+
+			m.inputs[subjectInput-1].SetValue(subject)
+			m.textarea.SetValue(body)
+
+			m.showVarPrompt = false
+			m.variablePrompt = nil
+			return m, nil
+
+		case VariablePromptClosedMsg:
+			// User cancelled variable prompt
+			m.showVarPrompt = false
+			m.variablePrompt = nil
+			return m, nil
+		}
+
+		// Update variable prompt
+		var cmd tea.Cmd
+		*m.variablePrompt, cmd = m.variablePrompt.Update(msg)
+		return m, cmd
+	}
+
+	// If picker is open, route messages to it
+	if m.showPicker && m.picker != nil {
+		switch msg := msg.(type) {
+		case ContactSelectedMsg:
+			// Contact was selected, add to appropriate field
+			contact := msg.Contact
+			emailStr := fmt.Sprintf("%s <%s>", contact.Name, contact.Email)
+
+			currentValue := m.inputs[msg.TargetField-1].Value()
+			if currentValue != "" {
+				emailStr = currentValue + ", " + emailStr
+			}
+			m.inputs[msg.TargetField-1].SetValue(emailStr)
+
+			m.showPicker = false
+			m.picker = nil
+			return m, nil
+
+		case TemplateSelectedMsg:
+			// Template was selected
+			template := msg.Template
+
+			// If template has variables, show variable prompt
+			if len(template.Variables) > 0 {
+				// Build defaults map for system variables
+				defaults := make(map[string]string)
+				// date default from config
+				dateFormat := "02.01.2006"
+				if m.config != nil && m.config.DateFormat != "" {
+					dateFormat = m.config.DateFormat
+				}
+				defaults["date"] = time.Now().Format(dateFormat)
+
+				// from_name/from_email defaults from provider config or compose From field
+				if m.selectedProvider != "" && m.config != nil {
+					if pc, err := m.config.GetProvider(m.selectedProvider); err == nil {
+						if pc.FromName != "" {
+							defaults["from_name"] = pc.FromName
+						}
+						if pc.FromAddress != "" {
+							defaults["from_email"] = pc.FromAddress
+						}
+					}
+				}
+
+				// Also consider the From input override (Name <email>)
+				fromInput := strings.TrimSpace(m.inputs[fromInput-1].Value())
+				if fromInput != "" {
+					// Parse as name and email if possible
+					if addr, err := mail.ParseAddress(fromInput); err == nil {
+						if addr.Name != "" {
+							defaults["from_name"] = addr.Name
+						}
+						if addr.Address != "" {
+							defaults["from_email"] = addr.Address
+						}
+					}
+				}
+
+				varPrompt := NewVariablePrompt(template, defaults)
+				m.variablePrompt = &varPrompt
+				m.showVarPrompt = true
+				m.showPicker = false
+				m.picker = nil
+				return m, nil
+			}
+
+			// No variables, just insert template as-is
+			subject, body := storage.RenderTemplate(template, map[string]string{})
+
+			m.inputs[subjectInput-1].SetValue(subject)
+			m.textarea.SetValue(body)
+
+			m.showPicker = false
+			m.picker = nil
+			return m, nil
+
+		case PickerClosedMsg:
+			m.showPicker = false
+			m.picker = nil
+			return m, nil
+		}
+
+		// Update picker
+		var cmd tea.Cmd
+		*m.picker, cmd = m.picker.Update(msg)
+		return m, cmd
+	}
 
 	// If file selector is open, route messages to it
 	if m.showFileSelector && m.fileSelector != nil {
@@ -171,6 +313,24 @@ func (m ComposeModel) Update(msg tea.Msg) (ComposeModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
+		case "ctrl+p":
+			// Open contact picker if on email fields
+			if m.FocusIndex >= toInput && m.FocusIndex <= bccInput {
+				picker := NewContactPicker(m.contacts, m.FocusIndex)
+				m.picker = &picker
+				m.showPicker = true
+				return m, nil
+			}
+
+		case "ctrl+t":
+			// Open template picker
+			if m.FocusIndex == subjectInput || m.FocusIndex == bodyInput {
+				picker := NewTemplatePicker(m.templates)
+				m.picker = &picker
+				m.showPicker = true
+				return m, nil
+			}
+
 		case "tab", "shift+tab", "up", "down":
 			s := msg.String()
 
@@ -276,6 +436,16 @@ func (m ComposeModel) Update(msg tea.Msg) (ComposeModel, tea.Cmd) {
 
 // View renders the compose model
 func (m ComposeModel) View() string {
+	// If variable prompt is open, show it instead
+	if m.showVarPrompt && m.variablePrompt != nil {
+		return m.variablePrompt.View()
+	}
+
+	// If picker is open, show it instead
+	if m.showPicker && m.picker != nil {
+		return m.picker.View()
+	}
+
 	// If file selector is open, show it instead
 	if m.showFileSelector && m.fileSelector != nil {
 		return m.fileSelector.View()
@@ -392,9 +562,9 @@ func (m ComposeModel) View() string {
 	b.WriteString(ui.RenderHelp(
 		"Tab", "next field",
 		"←/→", "change provider",
-		"Enter", "send/add attachment",
+		"Ctrl+P", "contacts",
+		"Ctrl+T", "templates",
 		"Ctrl+F", "file browser",
-		"Ctrl+D", "remove last attachment",
 	))
 
 	return b.String()

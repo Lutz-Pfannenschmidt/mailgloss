@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -17,22 +18,28 @@ type Tab int
 const (
 	TabCompose Tab = iota
 	TabHistory
+	TabContacts
+	TabTemplates
 	TabSettings
 )
 
 // AppModel is the main application model
 type AppModel struct {
-	activeTab     Tab
-	composeModel  ComposeModel
-	historyModel  HistoryModel
-	settingsModel SettingsModel
-	config        *config.Config
-	history       *storage.History
-	width         int
-	height        int
-	statusMsg     string
-	errorMsg      string
-	quitting      bool
+	activeTab      Tab
+	composeModel   ComposeModel
+	historyModel   HistoryModel
+	contactsModel  ContactsModel
+	templatesModel TemplatesModel
+	settingsModel  SettingsModel
+	config         *config.Config
+	history        *storage.History
+	contacts       *storage.Contacts
+	templates      *storage.Templates
+	width          int
+	height         int
+	statusMsg      string
+	errorMsg       string
+	quitting       bool
 }
 
 // NewAppModel creates a new app model
@@ -43,6 +50,13 @@ func NewAppModel() (*AppModel, error) {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Get config directory
+	configPath, err := config.GetConfigPath()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get config path: %w", err)
+	}
+	configDir := filepath.Dir(configPath)
+
 	// Load history with configured limits
 	limits := cfg.GetLimits()
 	hist, err := storage.LoadWithMaxEntries(limits.MaxHistoryEntries)
@@ -50,9 +64,23 @@ func NewAppModel() (*AppModel, error) {
 		return nil, fmt.Errorf("failed to load history: %w", err)
 	}
 
+	// Load contacts
+	contacts, err := storage.NewContacts(configDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load contacts: %w", err)
+	}
+
+	// Load templates
+	templates, err := storage.NewTemplates(configDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load templates: %w", err)
+	}
+
 	// Create models
-	composeModel := NewComposeModel(cfg)
+	composeModel := NewComposeModel(cfg, contacts, templates)
 	historyModel := NewHistoryModel(hist)
+	contactsModel := NewContactsModel(contacts)
+	templatesModel := NewTemplatesModel(templates)
 	settingsModel := NewSettingsModel(cfg)
 
 	// If no providers configured, start on settings tab
@@ -62,12 +90,16 @@ func NewAppModel() (*AppModel, error) {
 	}
 
 	return &AppModel{
-		activeTab:     activeTab,
-		composeModel:  composeModel,
-		historyModel:  historyModel,
-		settingsModel: settingsModel,
-		config:        cfg,
-		history:       hist,
+		activeTab:      activeTab,
+		composeModel:   composeModel,
+		historyModel:   historyModel,
+		contactsModel:  contactsModel,
+		templatesModel: templatesModel,
+		settingsModel:  settingsModel,
+		config:         cfg,
+		history:        hist,
+		contacts:       contacts,
+		templates:      templates,
 	}, nil
 }
 
@@ -89,6 +121,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case TabCompose:
 			// Check if we're in an input field or textarea (not on provider selector or send button)
 			isTyping = m.composeModel.FocusIndex > providerSelector && m.composeModel.FocusIndex < sendButton
+		case TabContacts:
+			// Check if we're in the add/edit view
+			isTyping = (m.contactsModel.currentView == ContactsViewAdd || m.contactsModel.currentView == ContactsViewEdit) &&
+				m.contactsModel.FocusIndex >= contactName && m.contactsModel.FocusIndex < contactSaveButton
+		case TabTemplates:
+			// Check if we're in the add/edit view
+			isTyping = (m.templatesModel.currentView == TemplatesViewAdd || m.templatesModel.currentView == TemplatesViewEdit) &&
+				m.templatesModel.FocusIndex >= templateName && m.templatesModel.FocusIndex < templateSaveButton
 		case TabSettings:
 			// Check if we're in an input field (not in list view or on buttons)
 			isTyping = m.settingsModel.currentView != SettingsViewList &&
@@ -124,6 +164,22 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "3":
+			if !isTyping {
+				m.activeTab = TabContacts
+				m.statusMsg = ""
+				m.errorMsg = ""
+				return m, nil
+			}
+
+		case "4":
+			if !isTyping {
+				m.activeTab = TabTemplates
+				m.statusMsg = ""
+				m.errorMsg = ""
+				return m, nil
+			}
+
+		case "5":
 			if !isTyping {
 				m.activeTab = TabSettings
 				m.statusMsg = ""
@@ -253,6 +309,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.historyModel, cmd = m.historyModel.Update(msg)
 		cmds = append(cmds, cmd)
 
+	case TabContacts:
+		m.contactsModel, cmd = m.contactsModel.Update(msg)
+		cmds = append(cmds, cmd)
+
+	case TabTemplates:
+		m.templatesModel, cmd = m.templatesModel.Update(msg)
+		cmds = append(cmds, cmd)
+
 	case TabSettings:
 		m.settingsModel, cmd = m.settingsModel.Update(msg)
 		cmds = append(cmds, cmd)
@@ -268,7 +332,7 @@ func (m AppModel) View() string {
 	}
 
 	// Render tabs with icons
-	tabs := []string{"✉ Compose", "📜 History", "⚙ Settings"}
+	tabs := []string{"✉ Compose", "📜 History", "👤 Contacts", "📝 Templates", "⚙ Settings"}
 	tabBar := ui.RenderTabs(tabs, int(m.activeTab))
 
 	// Render active tab content
@@ -278,6 +342,10 @@ func (m AppModel) View() string {
 		content = m.composeModel.View()
 	case TabHistory:
 		content = m.historyModel.View()
+	case TabContacts:
+		content = m.contactsModel.View()
+	case TabTemplates:
+		content = m.templatesModel.View()
 	case TabSettings:
 		content = m.settingsModel.View()
 	}
@@ -291,7 +359,7 @@ func (m AppModel) View() string {
 	}
 
 	// Render footer
-	footer := ui.HelpStyle.Render("Press q or Ctrl+C to quit | Numbers 1-3 switch tabs (when not typing)")
+	footer := ui.HelpStyle.Render("Press q or Ctrl+C to quit | Numbers 1-5 switch tabs (when not typing)")
 
 	return tabBar + "\n\n" + content + status + "\n\n" + footer
 }

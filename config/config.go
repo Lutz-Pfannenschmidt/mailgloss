@@ -27,6 +27,9 @@ type Config struct {
 	Providers       map[string]*ProviderConfig `yaml:"providers"`
 	DefaultProvider string                     `yaml:"default_provider,omitempty"`
 	Limits          *Limits                    `yaml:"limits,omitempty"`
+	// DateFormat is the layout used for the {{date}} system variable.
+	// Uses Go time layout syntax. Default: "02.01.2006" (DD.MM.YYYY).
+	DateFormat string `yaml:"date_format,omitempty"`
 }
 
 // Limits represents configurable limits
@@ -165,6 +168,7 @@ func DefaultConfig() *Config {
 		Providers:       make(map[string]*ProviderConfig),
 		DefaultProvider: "",
 		Limits:          DefaultLimits(),
+		DateFormat:      "02.01.2006",
 	}
 }
 
