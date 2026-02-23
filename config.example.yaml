@@ -1,0 +1,44 @@
+# Example MailGloss Configuration
+# Copy this file to ~/.config/mailgloss/config.yaml and update with your settings
+
+# Default provider to use (name of provider from the providers map)
+default_provider: "my-mailgun"
+
+# Provider configurations
+providers:
+  my-mailgun:
+    name: "my-mailgun"
+    type: mailgun
+    from_address: "your@email.com"
+    from_name: "Your Name"
+    mailgun:
+      api_key: "your-mailgun-api-key"
+      domain: "your-domain.com"
+      url: "https://api.mailgun.net"  # or https://api.eu.mailgun.net for EU
+  
+  my-smtp:
+    name: "my-smtp"
+    type: smtp
+    from_address: "your@email.com"
+    from_name: "Your Name"
+    smtp:
+      host: "smtp.gmail.com"
+      port: 587
+      username: "your@email.com"
+      password: "your-app-password"
+  
+  my-sendgrid:
+    name: "my-sendgrid"
+    type: sendgrid
+    from_address: "your@email.com"
+    from_name: "Your Name"
+    sendgrid:
+      api_key: "your-sendgrid-api-key"
+
+# Application limits (optional - defaults shown below)
+limits:
+  max_attachment_size_mb: 25    # Maximum attachment size in megabytes
+  max_history_entries: 100      # Maximum number of emails to keep in history
+  max_body_length: 10000        # Maximum email body length in characters
+  max_emails_per_field: 500     # Maximum character limit for To/CC/BCC fields
+
