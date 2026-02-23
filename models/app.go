@@ -147,104 +147,56 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 
-		// Numeric shortcuts (legacy)
-		case "1":
-			if !isTyping {
-				m.activeTab = TabCompose
-				m.statusMsg = ""
-				m.errorMsg = ""
-				return m, nil
-			}
-
-		case "2":
-			if !isTyping {
-				m.activeTab = TabHistory
-				m.statusMsg = ""
-				m.errorMsg = ""
-				return m, nil
-			}
-
-		case "3":
-			if !isTyping {
-				m.activeTab = TabContacts
-				m.statusMsg = ""
-				m.errorMsg = ""
-				return m, nil
-			}
-
-		case "4":
-			if !isTyping {
-				m.activeTab = TabTemplates
-				m.statusMsg = ""
-				m.errorMsg = ""
-				return m, nil
-			}
-
-		case "5":
-			if !isTyping {
-				m.activeTab = TabSettings
-				m.statusMsg = ""
-				m.errorMsg = ""
-				return m, nil
-			}
-
-		// Function keys F1-F5 (non-conflicting with view-level left/right/tab)
+		// Function keys F1-F6 should always work, even when typing
 		case "f1":
-			if !isTyping {
-				m.activeTab = TabCompose
-				m.statusMsg = ""
-				m.errorMsg = ""
-				return m, nil
-			}
+			m.activeTab = TabCompose
+			m.statusMsg = ""
+			m.errorMsg = ""
+			return m, nil
 
 		case "f2":
-			if !isTyping {
-				m.activeTab = TabHistory
-				m.statusMsg = ""
-				m.errorMsg = ""
-				return m, nil
-			}
+			m.activeTab = TabHistory
+			m.statusMsg = ""
+			m.errorMsg = ""
+			return m, nil
 
 		case "f3":
-			if !isTyping {
-				m.activeTab = TabContacts
-				m.statusMsg = ""
-				m.errorMsg = ""
-				return m, nil
-			}
+			m.activeTab = TabContacts
+			m.statusMsg = ""
+			m.errorMsg = ""
+			return m, nil
 
 		case "f4":
-			if !isTyping {
-				m.activeTab = TabTemplates
-				m.statusMsg = ""
-				m.errorMsg = ""
-				return m, nil
-			}
+			m.activeTab = TabTemplates
+			m.statusMsg = ""
+			m.errorMsg = ""
+			return m, nil
 
 		case "f5":
-			if !isTyping {
-				m.activeTab = TabSettings
-				m.statusMsg = ""
-				m.errorMsg = ""
-				return m, nil
-			}
+			m.activeTab = TabSettings
+			m.statusMsg = ""
+			m.errorMsg = ""
+			return m, nil
 
-		// Cycle tabs without conflicting with view-level left/right/tab
+		case "f6":
+			// F6 cycles to the next tab
+			m.activeTab = Tab((int(m.activeTab) + 1) % 5)
+			m.statusMsg = ""
+			m.errorMsg = ""
+			return m, nil
+
+		// Ctrl+Tab / Ctrl+Shift+Tab should also always work
 		case "ctrl+tab":
-			if !isTyping {
-				m.activeTab = Tab((int(m.activeTab) + 1) % 5)
-				m.statusMsg = ""
-				m.errorMsg = ""
-				return m, nil
-			}
+			m.activeTab = Tab((int(m.activeTab) + 1) % 5)
+			m.statusMsg = ""
+			m.errorMsg = ""
+			return m, nil
 
 		case "ctrl+shift+tab":
-			if !isTyping {
-				m.activeTab = Tab((int(m.activeTab) + 4) % 5)
-				m.statusMsg = ""
-				m.errorMsg = ""
-				return m, nil
-			}
+			m.activeTab = Tab((int(m.activeTab) + 4) % 5)
+			m.statusMsg = ""
+			m.errorMsg = ""
+			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -418,7 +370,7 @@ func (m AppModel) View() string {
 	}
 
 	// Render footer
-	footer := ui.HelpStyle.Render("Press q or Ctrl+C to quit | Numbers 1-5 or F1-F5 switch tabs; Ctrl+Tab/Ctrl+Shift+Tab also switch tabs (when not typing)")
+	footer := ui.HelpStyle.Render("Press q or Ctrl+C to quit | F1-F6 switch tabs; Ctrl+Tab/Ctrl+Shift+Tab also switch tabs")
 
 	return tabBar + "\n\n" + content + status + "\n\n" + footer
 }
