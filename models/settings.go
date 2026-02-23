@@ -30,6 +30,7 @@ type SettingsModel struct {
 	// List view
 	providerList []string
 	selectedIdx  int
+	appSelected  bool
 
 	// Add/Edit view
 	isEditing       bool
@@ -87,6 +88,7 @@ func NewSettingsModel(cfg *config.Config) SettingsModel {
 		currentView:  SettingsViewList,
 		providerList: nil,
 		selectedIdx:  0,
+		appSelected:  true,
 		providerTypes: []config.Provider{
 			config.ProviderMailgun,
 			config.ProviderSMTP,
@@ -100,11 +102,10 @@ func NewSettingsModel(cfg *config.Config) SettingsModel {
 	return m
 }
 
-// refreshProviderList reloads providerList and ensures "App Settings" is the first item
+// refreshProviderList reloads providerList
 func (m *SettingsModel) refreshProviderList() {
 	providers := m.config.ListProviders()
-	m.providerList = make([]string, 0, len(providers)+1)
-	m.providerList = append(m.providerList, "App Settings")
+	m.providerList = make([]string, 0, len(providers))
 	m.providerList = append(m.providerList, providers...)
 }
 
@@ -144,6 +145,14 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 		// Return to list view
 		m.currentView = SettingsViewList
 		m.providerList = m.config.ListProviders()
+		// If there are providers, select first provider; otherwise focus App Settings
+		if len(m.providerList) > 0 {
+			m.appSelected = false
+			m.selectedIdx = 0
+		} else {
+			m.appSelected = true
+			m.selectedIdx = 0
+		}
 
 	case ConfigErrorMsg:
 		m.saved = false
@@ -172,12 +181,35 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 func (m SettingsModel) updateListView(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
-		if m.selectedIdx > 0 {
-			m.selectedIdx--
+		// Move focus up: from provider list to App Settings, or wrap within providers
+		if m.appSelected {
+			// already on App Settings - wrap to last provider if any
+			if len(m.providerList) > 0 {
+				m.appSelected = false
+				m.selectedIdx = len(m.providerList) - 1
+			}
+		} else {
+			if m.selectedIdx > 0 {
+				m.selectedIdx--
+			} else {
+				// move focus to App Settings
+				m.appSelected = true
+			}
 		}
 	case "down", "j":
-		if m.selectedIdx < len(m.providerList)-1 {
-			m.selectedIdx++
+		// Move focus down: from App Settings into provider list, or advance within providers
+		if m.appSelected {
+			if len(m.providerList) > 0 {
+				m.appSelected = false
+				m.selectedIdx = 0
+			}
+		} else {
+			if m.selectedIdx < len(m.providerList)-1 {
+				m.selectedIdx++
+			} else {
+				// wrap to App Settings
+				m.appSelected = true
+			}
 		}
 	case "a", "n":
 		// Add new provider
@@ -187,20 +219,21 @@ func (m SettingsModel) updateListView(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 		m.initializeForm(nil)
 	case "e", "enter":
 		// Edit selected provider
-		if len(m.providerList) > 0 {
-			// If App Settings (first item) selected
-			if m.selectedIdx == 0 {
-				m.currentView = SettingsViewApp
-				// initialize app inputs
-				m.appInputs = make([]textinput.Model, 1)
-				m.appInputs[0] = createInput("02.01.2006", 50, 60)
-				if m.config != nil && m.config.DateFormat != "" {
-					m.appInputs[0].SetValue(m.config.DateFormat)
-				}
-				m.appFocusIndex = 0
-				m.appInputs[0].Focus()
-				return m, nil
+		// If App Settings selected, open app form
+		if m.appSelected {
+			m.currentView = SettingsViewApp
+			// initialize app inputs
+			m.appInputs = make([]textinput.Model, 1)
+			m.appInputs[0] = createInput("02.01.2006", 50, 60)
+			if m.config != nil && m.config.DateFormat != "" {
+				m.appInputs[0].SetValue(m.config.DateFormat)
 			}
+			m.appFocusIndex = 0
+			m.appInputs[0].Focus()
+			return m, nil
+		}
+
+		if len(m.providerList) > 0 {
 			providerName := m.providerList[m.selectedIdx]
 			if pc, err := m.config.GetProvider(providerName); err == nil {
 				m.currentView = SettingsViewEdit
@@ -211,7 +244,8 @@ func (m SettingsModel) updateListView(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 		}
 	case "d", "x":
 		// Delete selected provider
-		if len(m.providerList) > 0 {
+		// Only allow delete when a provider is focused
+		if !m.appSelected && len(m.providerList) > 0 {
 			providerName := m.providerList[m.selectedIdx]
 			if err := m.config.DeleteProvider(providerName); err == nil {
 				if err := m.config.Save(); err != nil {
@@ -219,7 +253,10 @@ func (m SettingsModel) updateListView(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 					m.saveError = fmt.Sprintf("Failed to save config: %v", err)
 				} else {
 					m.providerList = m.config.ListProviders()
-					if m.selectedIdx >= len(m.providerList) && m.selectedIdx > 0 {
+					if len(m.providerList) == 0 {
+						m.selectedIdx = 0
+						m.appSelected = true
+					} else if m.selectedIdx >= len(m.providerList) && m.selectedIdx > 0 {
 						m.selectedIdx--
 					}
 				}
@@ -227,7 +264,7 @@ func (m SettingsModel) updateListView(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 		}
 	case "s":
 		// Set as default
-		if len(m.providerList) > 0 {
+		if !m.appSelected && len(m.providerList) > 0 {
 			m.config.DefaultProvider = m.providerList[m.selectedIdx]
 			if err := m.config.Save(); err != nil {
 				m.saveError = fmt.Sprintf("Failed to save config: %v", err)
@@ -336,6 +373,7 @@ func (m SettingsModel) updateAppView(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 		return m, nil
 
 	case "tab", "shift+tab", "up", "down":
+		// We have 3 focusable positions in App view: 0=input, 1=Save, 2=Cancel
 		s := msg.String()
 		if s == "up" || s == "shift+tab" {
 			m.appFocusIndex--
@@ -343,21 +381,35 @@ func (m SettingsModel) updateAppView(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 			m.appFocusIndex++
 		}
 
-		if m.appFocusIndex >= len(m.appInputs) {
+		// wrap between 0 and 2
+		if m.appFocusIndex > 2 {
 			m.appFocusIndex = 0
 		} else if m.appFocusIndex < 0 {
-			m.appFocusIndex = len(m.appInputs) - 1
+			m.appFocusIndex = 2
 		}
 
+		// Update input focus only when the input field is selected
 		for i := range m.appInputs {
 			m.appInputs[i].Blur()
 		}
-		cmds = append(cmds, m.appInputs[m.appFocusIndex].Focus())
+		if m.appFocusIndex == 0 && len(m.appInputs) > 0 {
+			cmds = append(cmds, m.appInputs[0].Focus())
+		}
 		return m, tea.Batch(cmds...)
 
 	case "enter":
-		// Save app settings
-		dateFmt := m.appInputs[0].Value()
+		// Enter behavior depends on focused control: Save (1), Cancel (2), or Save from input (0)
+		if m.appFocusIndex == 2 {
+			// Cancel
+			m.currentView = SettingsViewList
+			return m, nil
+		}
+
+		// Save (either input focused or Save button)
+		dateFmt := ""
+		if len(m.appInputs) > 0 {
+			dateFmt = m.appInputs[0].Value()
+		}
 		if dateFmt != "" {
 			m.config.DateFormat = dateFmt
 			if err := m.config.Save(); err != nil {
@@ -589,7 +641,16 @@ func (m SettingsModel) renderAppView() string {
 func (m SettingsModel) renderListView() string {
 	var b strings.Builder
 
-	b.WriteString(ui.TitleStyle.Render("Settings - Provider List"))
+	b.WriteString(ui.TitleStyle.Render("Settings"))
+	b.WriteString("\n\n")
+
+	// App Settings control (separate from provider list)
+	appLabel := "[ App Settings ]"
+	if m.appSelected {
+		b.WriteString(ui.ButtonFocusedStyle.Render(appLabel))
+	} else {
+		b.WriteString(ui.ButtonStyle.Render(appLabel))
+	}
 	b.WriteString("\n\n")
 
 	if len(m.providerList) == 0 {
@@ -603,7 +664,7 @@ func (m SettingsModel) renderListView() string {
 		for i, name := range m.providerList {
 			prefix := "  "
 			style := ui.DisplayLabelStyle
-			if i == m.selectedIdx {
+			if !m.appSelected && i == m.selectedIdx {
 				prefix = "▸ "
 				style = style.Foreground(ui.Primary)
 			}
