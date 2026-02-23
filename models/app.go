@@ -147,6 +147,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 
+		// Numeric shortcuts (legacy)
 		case "1":
 			if !isTyping {
 				m.activeTab = TabCompose
@@ -182,6 +183,64 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "5":
 			if !isTyping {
 				m.activeTab = TabSettings
+				m.statusMsg = ""
+				m.errorMsg = ""
+				return m, nil
+			}
+
+		// Function keys F1-F5 (non-conflicting with view-level left/right/tab)
+		case "f1":
+			if !isTyping {
+				m.activeTab = TabCompose
+				m.statusMsg = ""
+				m.errorMsg = ""
+				return m, nil
+			}
+
+		case "f2":
+			if !isTyping {
+				m.activeTab = TabHistory
+				m.statusMsg = ""
+				m.errorMsg = ""
+				return m, nil
+			}
+
+		case "f3":
+			if !isTyping {
+				m.activeTab = TabContacts
+				m.statusMsg = ""
+				m.errorMsg = ""
+				return m, nil
+			}
+
+		case "f4":
+			if !isTyping {
+				m.activeTab = TabTemplates
+				m.statusMsg = ""
+				m.errorMsg = ""
+				return m, nil
+			}
+
+		case "f5":
+			if !isTyping {
+				m.activeTab = TabSettings
+				m.statusMsg = ""
+				m.errorMsg = ""
+				return m, nil
+			}
+
+		// Cycle tabs without conflicting with view-level left/right/tab
+		case "ctrl+tab":
+			if !isTyping {
+				m.activeTab = Tab((int(m.activeTab) + 1) % 5)
+				m.statusMsg = ""
+				m.errorMsg = ""
+				return m, nil
+			}
+
+		case "ctrl+shift+tab":
+			if !isTyping {
+				m.activeTab = Tab((int(m.activeTab) + 4) % 5)
 				m.statusMsg = ""
 				m.errorMsg = ""
 				return m, nil
@@ -359,7 +418,7 @@ func (m AppModel) View() string {
 	}
 
 	// Render footer
-	footer := ui.HelpStyle.Render("Press q or Ctrl+C to quit | Numbers 1-5 switch tabs (when not typing)")
+	footer := ui.HelpStyle.Render("Press q or Ctrl+C to quit | Numbers 1-5 or F1-F5 switch tabs; Ctrl+Tab/Ctrl+Shift+Tab also switch tabs (when not typing)")
 
 	return tabBar + "\n\n" + content + status + "\n\n" + footer
 }
