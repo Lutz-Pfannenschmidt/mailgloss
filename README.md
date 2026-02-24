@@ -2,6 +2,8 @@
 
 A terminal-based email client built with Go and Bubble Tea, supporting multiple email providers.
 
+![Example Image](example.png)
+
 ## Features
 
 - **Multiple Email Providers**: Support for Mailgun, SMTP, and SendGrid
